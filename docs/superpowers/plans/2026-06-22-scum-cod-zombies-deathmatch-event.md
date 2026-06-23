@@ -1,5 +1,15 @@
 # SCUM COD-Zombies Deathmatch Event Implementation Plan
 
+> **⚠ SUPERSEDED IN PART (2026-06-23) — location-scoping redesign.** This plan's Layer 1 cranked the
+> server-wide Encounter Manager and bet on combat *noise* to keep the horde at the arena. Verified
+> research showed SCUM has no config/zone way to localize a horde, so cranking the globals floods the
+> whole map — which fails the hard requirement that the spam only affect specific locations. The shipped
+> design now holds the globals at **vanilla** (`config/serversettings-horde-block.ini`) and spawns the
+> horde **at the arena** via an RCON loop (`tools/arena_horde_loop.py`, `#SpawnZombie ... Location`).
+> The validator (`tools/validate_horde_block.py`) was repurposed to FAIL if a global is cranked.
+> Use the as-built artifacts and the design spec / `docs/live-verification-handoff.md` as the source of
+> truth — the Task-1 config block and validator code below are kept only as historical record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Produce the four operator-ready artifacts (a horde-tuning `ServerSettings.ini` block, an arena Custom-Zone setup guide, a random-boss cheat-sheet, and a one-page README) that turn a private SCUM 1.3.x server into a PvPvE COD-Zombies-style deathmatch event — no script, no pak, no Blueprint.

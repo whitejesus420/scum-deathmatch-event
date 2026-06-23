@@ -5,6 +5,14 @@ die/RNG), then type the matching command in in-game chat **while standing in the
 arena**. `#SpawnCharacter` has **no location argument** — the NPC spawns in front
 of you, which is exactly why you stand in the arena to fire it.
 
+> Two different spawn commands — don't mix them up:
+> - **Bosses (this sheet):** `#SpawnCharacter <code>` — no location, spawns in
+>   front of you. Stand in the arena.
+> - **The horde:** `#SpawnZombie <id> <count> Location <brace>` — targets the
+>   arena coordinates. You don't type this by hand; `tools/arena_horde_loop.py`
+>   fires it on a loop. (Only `#SpawnZombie`/`#SpawnAnimal`/`#SpawnVehicle` take
+>   a Location arg; `#SpawnCharacter` does not.)
+
 > Command shape: `#SpawnCharacter <code> <amount>`  (amount optional, default 1)
 
 | Roll | Boss | Flavor | Command |

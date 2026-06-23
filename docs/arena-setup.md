@@ -38,15 +38,21 @@ changes **in real time — no server restart needed.** (Only zones defined in
      to protect any structures/cars in the arena.
    - Leave **Puppet Damage** on **Allow** so players can kill the horde.
 6. **Apply / save.** The zone appears on the map immediately — no restart.
-7. **Record the zone's center coordinates** here for the boss step:
+7. **Record the zone's center — as the full `#Location` brace.** Stand in the
+   middle of the arena, run `#Location` in chat, and copy the WHOLE brace it
+   prints (X/Y/Z **and** P/Y/R), not just X/Y. This single value drives the
+   whole event:
 
        Arena name: ____________________
-       Center X / Y: ____________________
+       #Location brace: ____________________________________________
+       (e.g. {X=-152157.266 Y=287169.562 Z=69696.133|P=0.000000 Y=0.000000 R=0.000000})
        Radius: ____________________
 
-   The admin stands near this center to drop bosses (`#SpawnCharacter` has no
-   location argument — it spawns in front of the admin). The same coordinates
-   feed the optional `[location]` arg of the cleanup command.
+   - Paste that brace into `ARENA_LOCATION` at the top of
+     `tools/arena_horde_loop.py` — it is where the horde spawns.
+   - It also feeds the `[location]` arg of `#DestroyZombiesWithinRadius` for cleanup.
+   - The admin stands near this center to drop bosses (`#SpawnCharacter` has no
+     location argument — it spawns in front of the admin).
 
 ## Notes & limits
 
