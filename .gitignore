@@ -1,0 +1,6 @@
+# Python (the horde-block validator runs from tools/)
+__pycache__/
+*.pyc
+
+# ServerSettings.ini backups operators are told to make before merging
+*.bak

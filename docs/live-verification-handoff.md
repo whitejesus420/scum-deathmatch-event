@@ -24,7 +24,9 @@ Project root: `C:\Users\chris\scum-deathmatch-event\`
 
 - This is Chris's **own private server**. Never touch official servers; never advise anti-cheat bypass.
 - **Back up `ServerSettings.ini`** (copy to `*.bak`) before changing it.
-- A **server restart** is required for Custom Zone changes and may be required for some settings — never
+- **Custom Zone changes:** zones created in the in-game **Admin Panel / Custom Zone Manager apply in real
+  time (no restart)** — only zones defined in a config file require a restart. See `docs/arena-setup.md`.
+  Confirm this on the live server. Some `ServerSettings.ini` settings may still need a restart — never
   assume a setting hot-reloads; note which ones do.
 - Confirm Chris's account is in the server's admin list before expecting in-game `#` commands to work.
 - If you cannot reach the live server, STOP and tell Chris exactly which of Steps A/B/C you could not do —
@@ -80,9 +82,10 @@ Project root: `C:\Users\chris\scum-deathmatch-event\`
 
 ## Step C — Verify the Custom Zone behavior
 
-1. As admin, open the in-game map Custom Zone editor. Confirm: zones must be **named**, a **restart** is
-   required for changes to apply, and the per-zone damage flags. Specifically confirm you can create a zone
-   that keeps **player-vs-player damage ON** (PvPvE free-for-all) — note the exact flag names/options.
+1. As admin, open the in-game Admin Panel / Custom Zone Manager. Confirm: zones must be **named**, whether
+   changes apply in **real time (no restart)** as `docs/arena-setup.md` documents for Admin-Panel zones,
+   and the per-zone damage flags. Specifically confirm you can create a zone that keeps **player-vs-player
+   damage ON** (PvPvE free-for-all) — note the exact flag names/options.
 2. **Update `docs/arena-setup.md`** if any step or flag wording is wrong. Leave the chosen arena POI as
    whatever Chris specified (ask him if it's still unset).
 
