@@ -144,14 +144,20 @@ State machine:
   newest file by mtime, re-read + line-count diff so log rotation on a server
   bounce is handled). For each new kill line, parse the JSON; if killer or victim
   has `"IsInGameEvent": true`, an event is live.
-- **ACTIVE** — on the first event kill, fire a wave at that kill's
-  `ServerLocation` (synthesized into a `{X= Y= Z=|P= Y= R=}` brace) and start the
-  interval pump:
+- **ACTIVE** — on the **first** event kill of the match, fire a wave at that
+  kill's `ServerLocation` (synthesized into a `{X= Y= Z=|P= Y= R=}` brace) and
+  start the interval pump:
   ```
   #SpawnZombie <id> <count> Location <event-brace>
   ```
-  Each subsequent event kill refreshes the "last seen" time and the spawn
-  location. Waves keep firing every `INTERVAL_SECONDS`.
+  The spawn point then **moves with the fight**: each subsequent event kill
+  refreshes the "last seen" time AND relocates the horde to that kill's spot. It
+  doesn't track event identity, so a brand-new event's first kill pulls the horde
+  over too — it **follows new events** for the whole session (2026-06-23 #3: Chris
+  — "based on the first kill … the spawn location should move … and follow the new
+  events"). Every flagged kill is inside SCUM's deathmatch arena, so the swarm
+  stays in the event zone without leaking onto the open map. Waves keep firing
+  every `INTERVAL_SECONDS`.
 - **Back to IDLE** — after `EVENT_QUIET_TIMEOUT` seconds with no event kills (the
   match ended), run `#DestroyZombiesWithinRadius <r> <brace>` to clear the arena.
   Ctrl+C also clears if a horde is active.
@@ -165,8 +171,9 @@ event detection can be validated before going live.
 - **Trigger:** native in-game event, detected via the kill log's `IsInGameEvent`
   flag (Chris's "track native events" choice). Reactive — see the 2026-06-23 #2
   revision note for the accepted tradeoffs.
-- **Location:** the event's own `ServerLocation` when `USE_EVENT_LOCATION=True`
-  (default); the fixed `ARENA_LOCATION` when `False`.
+- **Location:** the latest event kill's `ServerLocation` — starts at the first
+  kill, then moves with the fight and follows new events — when
+  `USE_EVENT_LOCATION=True` (default); the fixed `ARENA_LOCATION` when `False`.
 - **Difficulty is arena-only:** with the global HP/speed multipliers back at 1.0,
   tanky/fast enemies come from choosing tougher puppet **type IDs** in
   `PUPPET_IDS` — that buffs only what spawns at the event.

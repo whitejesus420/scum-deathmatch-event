@@ -9,11 +9,18 @@ WHAT THIS DOES
   signal that an event is live is the server's KILL log: every kill is logged as
   JSON, and an event kill carries `"IsInGameEvent": true` on the killer/victim.
 
-  So this script TAILS the kill log. The moment an in-game-event kill appears, it
-  starts pouring a puppet horde in at that kill's location over RCON
-  (`#SpawnZombie <id> <count> Location <coords>`), keeps waves coming while the
-  event stays hot, and clears the arena once the event goes quiet. The rest of
-  the map's Encounter Manager stays vanilla (config/serversettings-horde-block.ini).
+  So this script TAILS the kill log. The moment the FIRST in-game-event kill of a
+  match appears, it starts pouring a puppet horde in at that kill's location over
+  RCON (`#SpawnZombie <id> <count> Location <coords>`), and the spawn point MOVES
+  to follow the fight — each later event kill relocates the horde to that kill's
+  spot. It does not track event identity, so it also FOLLOWS NEW EVENTS: when a
+  fresh match starts somewhere else, its first event kill pulls the swarm over,
+  and the watcher loops event after event for the whole session. Because only
+  event kills carry the flag, every spot is inside SCUM's own deathmatch arena, so
+  the swarm tracks the action without leaking onto the open map. It keeps waves
+  coming while the event stays hot, and clears every spot it fired at once the
+  event goes quiet. The rest of the map's Encounter Manager stays vanilla
+  (config/serversettings-horde-block.ini).
 
 KNOWN CAVEATS (live-test these — see docs/live-verification-handoff.md)
   - REACTIVE, not on-start: the horde begins after the FIRST event kill (an event
@@ -68,9 +75,10 @@ RCON_HOST = "127.0.0.1"      # run this on the server box (or its LAN/tailnet IP
 RCON_PORT = 27015            # SCUM-RCON port from the server config (verify!)
 RCON_PASSWORD = ""           # SCUM-RCON password — REQUIRED, set this
 
-# Spawn the horde AT the event's location (read from the kill log), so puppets
-# land where the native event is happening. Set False to always use the fixed
-# ARENA_LOCATION below instead (use this if puppets can't reach the native arena).
+# Spawn the horde AT the event's location (read from the kill log) and let it MOVE
+# to follow the fight — each event kill relocates the horde to that kill's spot.
+# Set False to always use the fixed ARENA_LOCATION below instead (use this if
+# puppets can't reach the native arena).
 USE_EVENT_LOCATION = True
 
 # Fallback / --once arena center, as SCUM's `#Location` brace (X/Y/Z | P/Y/R).
@@ -390,7 +398,8 @@ def _do_clear(rcon, loc, dry):
 
 def _do_clear_all(rcon, locs, dry):
     """Clear every location a wave actually fired at this event, not just the last
-    one — players roam, so the horde chases the fight across multiple spots."""
+    one — the spawn point moves with the fight, so the horde leaves puppets across
+    multiple spots."""
     ok = True
     for loc in locs:
         if not _do_clear(rcon, loc, dry):
@@ -436,6 +445,12 @@ def run_event_watcher(rcon, dry_run=False):
             acc_located += res["located"]
 
             for k in res["events"]:
+                # The horde starts on the FIRST event kill, and the spawn point
+                # MOVES with the fight: each later event kill relocates it to that
+                # kill's spot. Event identity isn't tracked, so a brand-new event's
+                # first kill pulls the horde over too (follow-new-events). Every
+                # flagged kill is inside SCUM's deathmatch arena, so the swarm
+                # tracks the action without leaking onto the open map.
                 if k["loc"] is None and USE_EVENT_LOCATION and not warned_no_loc:
                     print("warning: event kill had no parseable ServerLocation; using "
                           "ARENA_LOCATION. If this persists, verify the ServerLocation "

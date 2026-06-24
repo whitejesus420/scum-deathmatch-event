@@ -7,8 +7,9 @@ can drop a random boss by hand for a difficulty spike.
 
 It hooks SCUM's **native in-game events** (Tab > Events — Deathmatch / TDM / CTF /
 Brawl / MMA): a watcher tails the server's kill log, and the moment a
-native-event kill appears it starts the horde at that location. See the caveats
-under "Running an event" — the trigger is reactive, not instant.
+native-event kill appears it starts the horde at that location, then moves the
+spawn point to follow each new event kill (and new events). See the caveats under
+"Running an event" — the trigger is reactive, not instant.
 
 **No mod pak, no Blueprint.** It is plain config + admin commands + one small
 Python RCON loop, so a SCUM patch costs you at most a quick re-verify of a few
@@ -76,8 +77,10 @@ keep the swarm pinned to the event.
    / Brawl / MMA). SCUM teleports them into its own arena and the match begins.
 3. On the **first kill** of that match, the watcher detects the
    `"IsInGameEvent": true` flag and starts pouring the horde in at that location,
-   a wave every `INTERVAL_SECONDS`, until the event goes quiet
-   (`EVENT_QUIET_TIMEOUT`), then it clears the puppets. PvP is live, so it's a
+   a wave every `INTERVAL_SECONDS`. The spawn point then **moves to follow the
+   fight** — each new event kill (and each new event) relocates the horde to that
+   kill's spot — until the event goes quiet (`EVENT_QUIET_TIMEOUT`), then it
+   clears the puppets from every spot it spawned at. PvP is live, so it's a
    free-for-all on top of the native match.
 4. When you want a spike, roll 1–8 and type the boss command from the cheat-sheet
    while standing where the fight is.
