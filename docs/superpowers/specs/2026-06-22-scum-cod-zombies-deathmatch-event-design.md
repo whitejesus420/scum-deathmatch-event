@@ -1,7 +1,7 @@
 # SCUM COD-Zombies Deathmatch Event — Design
 
-**Date:** 2026-06-22 (revised 2026-06-23: location-scoping redesign)
-**Status:** Design — revised so the horde is arena-only (see Revision note)
+**Date:** 2026-06-22 (revised 2026-06-23: location-scoping redesign; event-trigger redesign)
+**Status:** Design — revised so the horde is arena-only AND event-driven (see Revision notes)
 **Owner:** Chris
 **Target:** A private SCUM dedicated server Chris owns/admins (him + friends). Single-player not required.
 
@@ -26,6 +26,34 @@ manual admin spawning), and the tanky/sprinting difficulty is **arena-only** —
 the global `PuppetHealthMultiplier`/`PuppetRunningSpeedMultiplier` revert to 1.0;
 tougher enemies come from choosing tougher puppet type IDs in the loop. The rest
 of this spec is updated to match; sections below marked accordingly.
+
+## Revision note (2026-06-23 #2) — horde is now event-driven (kill-log trigger)
+
+Chris's requirement: the horde must track SCUM's **native in-game events** (Tab >
+Events — Deathmatch / TDM / CTF / Brawl / MMA) and start when the deathmatch
+starts, rather than running as a blind standalone timer.
+
+Research (adversarially verified across 5 server-tool codebases, 2026-06-23)
+found the literal request is **infeasible** and surfaced the realistic path:
+- There is **no admin/RCON command** to start a native event, and **no RCON
+  event-query or async push** — RCON is strictly request/response.
+- **No log line is written when an event starts.** The single native signal that
+  an event is live is the **kill log**: each kill is JSON, and an event kill
+  carries `"IsInGameEvent": true` (with a `ServerLocation`).
+
+So Layer 1b changed from a **blind interval timer** to an **event-driven kill-log
+watcher**: it tails the newest `kill_<ts>.log` in `…\Saved\SaveFiles\Logs`
+(UTF-16-LE), and on an `IsInGameEvent` kill it starts the horde at that kill's
+`ServerLocation`, keeps waves coming on the interval while event kills keep
+arriving, and clears the arena after `EVENT_QUIET_TIMEOUT` seconds of silence.
+
+**Accepted tradeoffs (Chris chose this with eyes open):** the trigger is
+**reactive** (fires after the first event *kill*, not at event start), it
+**can't distinguish event types** (the flag only says "in an event"), and
+**engagement is unverified** — native events teleport players into SCUM's own
+arena, and whether RCON-spawned puppets reach them there is a live-test unknown
+(`USE_EVENT_LOCATION=False` falls back to a fixed arena if not). The interval
+loop is kept *inside* the live-event window as the wave pump.
 
 ## Goal
 
@@ -104,25 +132,44 @@ Rationale notes:
   map. The only native location-scoped lever is the admin/RCON `#SpawnZombie ...
   Location` command, which Layer 1b uses.
 
-### Layer 1b — The arena horde loop (`tools/arena_horde_loop.py`, RCON)
+### Layer 1b — The event-driven horde watcher (`tools/arena_horde_loop.py`, kill-log + RCON)
 
-What actually makes the horde, and the only part that targets a location. A
-dependency-free Python Valve-Source-RCON client (works with the SCUM-RCON Nexus
-mod) that, on an interval, fires:
+What actually makes the horde, the only part that targets a location, and (as of
+the 2026-06-23 #2 revision) the part that ties the horde to SCUM's native events.
+A dependency-free Python tool that **tails the server kill log** and drives a
+Valve-Source-RCON client (works with the SCUM-RCON Nexus mod).
 
-```
-#SpawnZombie <id> <count> Location <arena-brace>
-```
+State machine:
+- **IDLE** — tail the newest `kill_<ts>.log` in `LOG_DIR` (UTF-16-LE, BOM-aware,
+  newest file by mtime, re-read + line-count diff so log rotation on a server
+  bounce is handled). For each new kill line, parse the JSON; if killer or victim
+  has `"IsInGameEvent": true`, an event is live.
+- **ACTIVE** — on the first event kill, fire a wave at that kill's
+  `ServerLocation` (synthesized into a `{X= Y= Z=|P= Y= R=}` brace) and start the
+  interval pump:
+  ```
+  #SpawnZombie <id> <count> Location <event-brace>
+  ```
+  Each subsequent event kill refreshes the "last seen" time and the spawn
+  location. Waves keep firing every `INTERVAL_SECONDS`.
+- **Back to IDLE** — after `EVENT_QUIET_TIMEOUT` seconds with no event kills (the
+  match ended), run `#DestroyZombiesWithinRadius <r> <brace>` to clear the arena.
+  Ctrl+C also clears if a horde is active.
 
-to drop puppets **at the arena and nowhere else**, and on stop/`--reset` runs
-`#DestroyZombiesWithinRadius <r> <arena-brace>` to clear them. Config (RCON
-host/port/password, the arena `#Location` brace, puppet type IDs, wave count,
-interval) lives in a block at the top of the file.
+Config (LOG_DIR, RCON host/port/password, `USE_EVENT_LOCATION`, fallback
+`ARENA_LOCATION` brace, puppet type IDs, wave count, interval, quiet timeout,
+poll interval) lives in a block at the top of the file. A `--dry-run` mode
+watches the live log and prints the spawn commands without touching RCON, so
+event detection can be validated before going live.
 
-- **Trigger:** automatic interval loop (Chris's choice over manual admin spawning).
+- **Trigger:** native in-game event, detected via the kill log's `IsInGameEvent`
+  flag (Chris's "track native events" choice). Reactive — see the 2026-06-23 #2
+  revision note for the accepted tradeoffs.
+- **Location:** the event's own `ServerLocation` when `USE_EVENT_LOCATION=True`
+  (default); the fixed `ARENA_LOCATION` when `False`.
 - **Difficulty is arena-only:** with the global HP/speed multipliers back at 1.0,
   tanky/fast enemies come from choosing tougher puppet **type IDs** in
-  `PUPPET_IDS` — that buffs only what spawns in the arena.
+  `PUPPET_IDS` — that buffs only what spawns at the event.
 - **Volume** comes from `<count>` and the interval, bounded by the global
   `MaxAllowedPuppets` cap (heavy arena spawning draws from the shared pool).
 
@@ -163,7 +210,7 @@ C:\Users\chris\scum-deathmatch-event\
   docs\superpowers\specs\2026-06-22-scum-cod-zombies-deathmatch-event-design.md   (this file)
   config\serversettings-horde-block.ini      (Layer-1 vanilla global baseline to merge into ServerSettings.ini)
   tools\validate_horde_block.py              (guard that the Layer-1 globals stay vanilla)
-  tools\arena_horde_loop.py                  (Layer-1b RCON loop that spawns the horde AT the arena)
+  tools\arena_horde_loop.py                  (Layer-1b event-driven watcher: tails the kill log, spawns the horde AT the event)
   docs\arena-setup.md                          (Layer-2 step-by-step for creating the Custom Zone, no restart)
   docs\boss-cheat-sheet.md                     (Layer-3 numbered boss roster + #SpawnCharacter / cleanup commands)
   README.md                                    (one-page operator guide: how to deploy, tune, run an event)
@@ -181,6 +228,11 @@ All artifacts are text/config/stdlib-Python. There is no `.pak` and no Blueprint
    `#ListZombies` on the live server (the latter feed `PUPPET_IDS` in the loop).
 4. **RCON + `#SpawnZombie` syntax** — confirm the SCUM-RCON port/password, that `#SpawnZombie <id> <count>
    Location <brace>` is the live argument order, and that the brace from `#Location` is accepted verbatim.
+4b. **Kill-log trigger** — confirm `LOG_DIR` (`…\Saved\SaveFiles\Logs`), that `kill_<ts>.log` is UTF-16-LE,
+   and that a live 1.3.x event kill really writes `"IsInGameEvent": true` + `ServerLocation`. Validate with
+   `--dry-run` against a real Tab > Events match before going live (the field name/format is the one
+   load-bearing research assumption). Decide `USE_EVENT_LOCATION` from whether puppets reach players inside
+   SCUM's native event arena.
 5. **Hosting/edit path** — how Chris edits `ServerSettings.ini` and restarts. Affects the README deploy
    steps, not the design.
 6. **Playtest tuning** — dial in `COUNT_PER_WAVE` / `INTERVAL_SECONDS` vs. `MaxAllowedPuppets`; pick puppet
@@ -189,8 +241,9 @@ All artifacts are text/config/stdlib-Python. There is no `.pak` and no Blueprint
 
 ## Success criteria
 
-- Players who gather at the arena are swarmed by a dense, fast, tanky horde that keeps refilling while the
-  loop runs — and the **rest of the map stays at normal puppet density** (the spam is location-scoped).
+- When players start a native Tab > Events match, the watcher detects it (first event kill) and they are
+  swarmed by a dense, fast, tanky horde that keeps refilling until the event ends — and the **rest of the
+  map stays at normal puppet density** (the spam is location- AND event-scoped).
 - PvP damage works inside the arena (free-for-all holds).
 - An admin can, on demand, type one command to drop a random boss into the arena, and the loop/`--reset`
   clears the arena afterward.

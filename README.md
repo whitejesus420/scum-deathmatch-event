@@ -1,9 +1,14 @@
 # SCUM COD-Zombies Deathmatch Event
 
 A Call-of-Duty-Zombies-style event for a **private SCUM 1.3.x server**: a PvPvE
-free-for-all in a fixed arena where an endless, escalating horde of puppets
-pours in **at the arena only** while players also fight each other — last one
-standing. An admin can drop a random boss by hand for a difficulty spike.
+free-for-all where an endless, escalating horde of puppets pours in **at the
+event only** while players also fight each other — last one standing. An admin
+can drop a random boss by hand for a difficulty spike.
+
+It hooks SCUM's **native in-game events** (Tab > Events — Deathmatch / TDM / CTF /
+Brawl / MMA): a watcher tails the server's kill log, and the moment a
+native-event kill appears it starts the horde at that location. See the caveats
+under "Running an event" — the trigger is reactive, not instant.
 
 **No mod pak, no Blueprint.** It is plain config + admin commands + one small
 Python RCON loop, so a SCUM patch costs you at most a quick re-verify of a few
@@ -28,10 +33,14 @@ keep the swarm pinned to the event.
    Encounter Manager at vanilla (the opposite of a crank) so the open map stays
    calm, plus the PvP-gate note. The only deliberate non-default is a puppet
    *cap* (headroom for the arena crowd — it spawns nothing itself).
-2. **The arena horde** — `tools/arena_horde_loop.py`. A dependency-free Python
-   Source-RCON client that, on an interval, spawns puppets **at the arena
-   coordinates** and clears them between rounds. This is what actually makes the
-   horde, and the only part that targets a location.
+2. **The event-driven horde** — `tools/arena_horde_loop.py`. A dependency-free
+   Python tool that tails the server's **kill log**, and when a kill flagged
+   `"IsInGameEvent": true` appears (a native Tab > Events match is live), spawns
+   puppets at that kill's location over Source-RCON and keeps waves coming until
+   the event goes quiet, then clears them. This is what actually makes the horde,
+   and the only part that targets a location. (Why the kill log? RCON has no
+   event signal and no log line is written at event start — the `IsInGameEvent`
+   kill flag is the one native "an event is happening" signal that exists.)
 3. **The arena zone** — `docs/arena-setup.md`. One named in-game Custom Zone
    with PvP damage left ON. Created live via the Admin Panel (no restart).
 4. **Random bosses** — `docs/boss-cheat-sheet.md`. A numbered roster you roll
@@ -42,29 +51,52 @@ keep the swarm pinned to the event.
 1. **Back up** your server's `ServerSettings.ini` (copy to `ServerSettings.ini.bak`).
 2. **Merge** the keys from `config/serversettings-horde-block.ini` into it. Match
    the file style your server already uses (`scum.Key` under `[World]`, or bare
-   `Key` under `[SCUM.WorldSettings]` — see the comments in the block). Confirm
-   the global human-vs-human damage multiplier is **> 0** so PvP works. Do **not**
-   crank the Encounter multipliers — that re-globalizes the horde.
+   `Key` under `[SCUM.WorldSettings]` — see the comments in the block). Do **not**
+   crank the Encounter multipliers — that re-globalizes the horde. (PvP note: a
+   **native Tab > Events match is PvP inside its own arena even on an all-PVE
+   server** — confirmed live — so the global human-vs-human damage multiplier only
+   matters for the `USE_EVENT_LOCATION=False` fixed-arena fallback.)
 3. Validate the block: `python tools/validate_horde_block.py` (it FAILS if a
    global has been cranked off vanilla).
 4. **Restart** the server (the Encounter/puppet settings are read at world load).
 5. **Create the arena** following `docs/arena-setup.md` (in-game, no restart).
    Record the center coordinates **as the full `#Location` brace** in that file.
 6. **Enable RCON** (SCUM-RCON Nexus mod) and fill in the CONFIG block at the top
-   of `tools/arena_horde_loop.py`: RCON host/port/password, `ARENA_LOCATION`
-   (the brace from step 5), and `PUPPET_IDS` (from `#ListZombies`).
+   of `tools/arena_horde_loop.py`: `LOG_DIR` (the server's
+   `…\Saved\SaveFiles\Logs` folder), RCON host/port/password, and `PUPPET_IDS`
+   (from `#ListZombies`). Set `ARENA_LOCATION` (the brace from step 5) too — it's
+   the fallback if `USE_EVENT_LOCATION=False`.
 7. **Print/open** `docs/boss-cheat-sheet.md`.
 
 ## Running an event
 
-1. Tell players where/when. They gather in the arena.
-2. Start the horde: `python tools/arena_horde_loop.py`. It spawns a wave at the
-   arena every `INTERVAL_SECONDS` and keeps refilling. PvP is live, so it's also
-   a free-for-all. `--once` fires a single wave; `--reset` clears the arena.
-3. When you want a spike, roll 1–8 and type the boss command from the cheat-sheet
-   while standing in the arena.
-4. Stop the loop with **Ctrl+C** — it clears the arena on the way out (or run
-   `python tools/arena_horde_loop.py --reset`).
+1. Start the watcher: `python tools/arena_horde_loop.py`. It connects to RCON
+   and then just watches the kill log — idle until an event happens.
+2. Players open **Tab > Events** and start a native match (Deathmatch / TDM / CTF
+   / Brawl / MMA). SCUM teleports them into its own arena and the match begins.
+3. On the **first kill** of that match, the watcher detects the
+   `"IsInGameEvent": true` flag and starts pouring the horde in at that location,
+   a wave every `INTERVAL_SECONDS`, until the event goes quiet
+   (`EVENT_QUIET_TIMEOUT`), then it clears the puppets. PvP is live, so it's a
+   free-for-all on top of the native match.
+4. When you want a spike, roll 1–8 and type the boss command from the cheat-sheet
+   while standing where the fight is.
+5. Stop the watcher with **Ctrl+C** — it clears the arena on the way out if a
+   horde is active. `--reset` clears the fallback arena; `--once` fires one test
+   wave there.
+
+**Caveats (live-test these — see `docs/live-verification-handoff.md`):**
+
+- **Reactive, not instant.** The horde starts after the first *kill* of the
+  event (a match needs ≥2 players, then a death), not the moment players join.
+- **Can't tell which event.** The flag says "in an event," not Deathmatch vs MMA.
+- **Engagement is unverified.** Native events teleport players into SCUM's own
+  arena; whether RCON-spawned puppets can reach/fight them there isn't confirmed.
+  If they can't, set `USE_EVENT_LOCATION=False` to spawn at your fixed
+  `ARENA_LOCATION` instead and run the event there.
+- **Validate first without RCON:** `python tools/arena_horde_loop.py --dry-run`
+  watches the live kill log and prints the spawn commands it *would* send, so you
+  can confirm event detection before wiring anything up.
 
 ## Tuning
 
@@ -89,7 +121,7 @@ in **`docs/live-verification-handoff.md`**. After a major patch, re-run it.
 
 - `config/serversettings-horde-block.ini` — Layer 1 global baseline (+ inline docs)
 - `tools/validate_horde_block.py` — guard that the globals stay vanilla
-- `tools/arena_horde_loop.py` — Layer 1b arena horde RCON loop
+- `tools/arena_horde_loop.py` — Layer 1b event-driven horde watcher (kill-log + RCON)
 - `docs/arena-setup.md` — Layer 2 arena Custom Zone guide
 - `docs/boss-cheat-sheet.md` — Layer 3 boss roster + commands
 - `docs/live-verification-handoff.md` — how to reconcile values with your live server

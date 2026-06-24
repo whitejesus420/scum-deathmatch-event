@@ -5,17 +5,25 @@ deathmatch horde event.** The design is fixed; your job is to replace the "verif
 unknowns with real values pulled from Chris's running SCUM 1.3.x dedicated server, then update the project
 artifacts and report what you changed.
 
-**The architecture is LOCKED — and note the 2026-06-23 location-scoping redesign:** the horde is
-**arena-only**. It is spawned AT the arena by an RCON loop (`tools/arena_horde_loop.py`) using
-`#SpawnZombie <id> <count> Location <brace>`; the server-wide Encounter Manager is held at **vanilla** so
-the rest of the map stays normal. Do **not** "fix" an empty-feeling field by cranking the global
-multipliers in `config/serversettings-horde-block.ini` — that re-globalizes the horde and breaks the whole
-point (and `tools/validate_horde_block.py` will fail). To make the horde bigger, raise `COUNT_PER_WAVE` /
-lower `INTERVAL_SECONDS` in the loop instead. Full rationale:
+**The architecture is LOCKED — and note the 2026-06-23 location-scoping redesign + the 2026-06-23
+event-trigger redesign:** the horde is **arena-only** and **event-driven**. `tools/arena_horde_loop.py`
+TAILS the server's kill log; when a native in-game-event kill appears (`"IsInGameEvent": true`) it spawns
+puppets AT that kill's location via `#SpawnZombie <id> <count> Location <brace>`, keeps waves coming while
+the event is live, and clears them on a quiet timeout. The server-wide Encounter Manager is held at
+**vanilla** so the rest of the map stays normal. Do **not** "fix" an empty-feeling field by cranking the
+global multipliers in `config/serversettings-horde-block.ini` — that re-globalizes the horde and breaks the
+whole point (and `tools/validate_horde_block.py` will fail). To make the horde bigger, raise
+`COUNT_PER_WAVE` / lower `INTERVAL_SECONDS` in the loop instead. Full rationale:
 `docs/superpowers/specs/2026-06-22-scum-cod-zombies-deathmatch-event-design.md`.
 
-The layers: (1) vanilla global baseline + PvP gate, (1b) the arena RCON spawn loop, (2) one Custom Zone
-arena, (3) printable random-boss cheat-sheet. PvPvE, no pak, no Blueprint.
+The layers: (1) vanilla global baseline + PvP gate, (1b) the event-driven kill-log horde watcher, (2) one
+Custom Zone arena (fallback location), (3) printable random-boss cheat-sheet. PvPvE, no pak, no Blueprint.
+
+**Why the kill log (don't redesign this):** SCUM RCON is request/response — no async push, no event-query
+command — and no log line is written when an event starts. Researched + adversarially verified across 5
+server-tool codebases (2026-06-23): the per-kill `IsInGameEvent` flag is the ONLY native "an event is
+happening" signal. The watcher is therefore REACTIVE (fires after the first event kill, not at start) and
+cannot tell which event type is running. These are accepted tradeoffs, not bugs to fix.
 
 ## Project location & artifacts you will edit
 
@@ -24,7 +32,7 @@ Project root: `C:\Users\chris\scum-deathmatch-event\`
 | File | What you update |
 |---|---|
 | `config/serversettings-horde-block.ini` | Fix any key NAME that differs on the live server. Keep every value at the VANILLA baseline (don't re-crank); only `MaxAllowedPuppets` is a deliberate non-default. |
-| `tools/arena_horde_loop.py` | Confirm the `#SpawnZombie` argument order, the RCON port/password, and fill `ARENA_LOCATION` + `PUPPET_IDS` from live captures. |
+| `tools/arena_horde_loop.py` | Confirm `LOG_DIR` + the live kill-log format (`IsInGameEvent` + `ServerLocation`), the `#SpawnZombie` argument order, the RCON port/password, and fill `PUPPET_IDS` (+ `ARENA_LOCATION` fallback) from live captures. |
 | `docs/boss-cheat-sheet.md` | Replace the boss roster with real `BP_` codes from `#ListCharacters`. |
 | `docs/arena-setup.md` | Correct the Custom Zone steps / PvP-flag wording if the live behavior differs. |
 | `docs/live-verification-results.md` | **Create this** — log every confirmed value, its source (file path / in-game output), and confidence. |
@@ -67,12 +75,32 @@ Project root: `C:\Users\chris\scum-deathmatch-event\`
    - `EncounterCanRemoveLowPriorityCharacters`
 3. **Reconcile** against `config/serversettings-horde-block.ini`: if a key's real name differs, fix the
    NAME in the block (keep the vanilla value). If a key is absent from the live file, note it for Chris.
-   Confirm the live **PvP / human-vs-human damage multiplier** key name and that it is `> 0` (and
-   `ServerPlaystyle` is not `PVE`) — without it the arena is not lethal.
+   **PvP gate — CONFIRMED LIVE 2026-06-23:** SCUM's **native Tab > Events matches are PvP inside their
+   own arena even on an all-PVE server.** Chris's server is `ServerPlaystyle PVE` and the native
+   deathmatch is still lethal player-vs-player. So for the default `USE_EVENT_LOCATION=True` path (horde
+   spawns at the native event) you need **no** server-wide PvP setting — the event supplies its own PvP.
+   The human-vs-human damage multiplier / non-`PVE` playstyle only matters for the
+   `USE_EVENT_LOCATION=False` fixed-arena fallback, where the arena Custom Zone must itself allow PvP.
 4. Re-run `python tools/validate_horde_block.py` after any edit — it must still print OK.
 
-## Step B — Capture the horde inputs for the RCON loop (in-game, as admin)
+## Step B — Capture the horde inputs for the event watcher (in-game, as admin)
 
+0. **Confirm the kill-log path + format (this is the event trigger — do it first).**
+   - Find the gameplay-log folder: `...\SCUM\Saved\SaveFiles\Logs` (NOT `...\Saved\Logs`, which is the
+     engine console log — different subsystem). Locate it with Glob, e.g. `**/Saved/SaveFiles/Logs`. Set
+     `LOG_DIR` in `tools/arena_horde_loop.py` to it.
+   - Confirm a `kill_<YYYYMMDDHHMMSS>.log` exists there and is **UTF-16-LE** (BOM `FF FE`). Open the newest
+     one and confirm a kill line looks like `YYYY.MM.DD-HH.MM.SS: {"Killer":{...},"Victim":{...},...}`.
+   - Confirm the JSON has `"IsInGameEvent"` (bool) on the Killer/Victim objects and a
+     `"ServerLocation":{"X":..,"Y":..,"Z":..}`. If the field names differ on the live 1.3.x build, fix
+     `_event_kill` / `_loc_from` in the watcher. **Best test:** start a real Tab > Events match with a
+     second account, get one kill, and confirm that kill line shows `"IsInGameEvent": true`.
+   - Validate end-to-end with `python tools/arena_horde_loop.py --dry-run` (no RCON needed): trigger an
+     event kill and confirm the watcher prints "in-game-event kill … -> starting horde" with the right
+     location. If it stays silent, the field/format assumption is wrong — fix it before going live. Watch
+     the periodic `[watch] … parsed N kill line(s), M event-flagged, K located` heartbeat: if ordinary
+     kills push **parsed up but event-flagged stays 0** during a real event, the `IsInGameEvent` field name
+     is wrong; if flagged climbs but **located stays 0**, the `ServerLocation` field name is wrong.
 1. Run `#ListZombies` in admin chat. From it, pick the puppet **type IDs** you want for the arena horde —
    including tougher/faster types if Chris wants tanky enemies (difficulty is arena-only now, so it comes
    from the puppet TYPE, not the global HP/speed multipliers). Record the exact IDs.
@@ -82,9 +110,13 @@ Project root: `C:\Users\chris\scum-deathmatch-event\`
    `#SpawnZombie <id> 1 Location {<the brace>}` and confirm a puppet appears AT the arena (not in front of
    you). Confirm the argument order is `<id> <count> Location <brace>`; if the live build differs, note the
    real order. Also confirm `#DestroyZombiesWithinRadius <radius> {<brace>}` clears that spot.
-4. **Update `tools/arena_horde_loop.py`:** set `ARENA_LOCATION` to the brace, `PUPPET_IDS` to the IDs,
-   `RCON_HOST`/`RCON_PORT`/`RCON_PASSWORD` to the SCUM-RCON values, and fix `SPAWN_TEMPLATE` if the
-   argument order differed. Test with `python tools/arena_horde_loop.py --once`, then `--reset`.
+4. **Update `tools/arena_horde_loop.py`:** set `PUPPET_IDS` to the IDs, `ARENA_LOCATION` to the brace (the
+   `USE_EVENT_LOCATION=False` fallback), `RCON_HOST`/`RCON_PORT`/`RCON_PASSWORD` to the SCUM-RCON values,
+   and fix `SPAWN_TEMPLATE` if the argument order differed (`LOG_DIR` was set in B0). Test the spawn path
+   with `python tools/arena_horde_loop.py --once`, then `--reset`. Then test the full trigger: run
+   `python tools/arena_horde_loop.py`, start a real Tab > Events match, and confirm waves spawn at the
+   fight and clear after it ends. Decide `USE_EVENT_LOCATION` based on whether puppets actually reach
+   players in SCUM's native event arena.
 
 ## Step C — Capture the real boss NPC codes (in-game, as admin)
 
