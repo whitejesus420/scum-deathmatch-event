@@ -32,7 +32,7 @@ Project root: `C:\Users\chris\scum-deathmatch-event\`
 | File | What you update |
 |---|---|
 | `config/serversettings-horde-block.ini` | Fix any key NAME that differs on the live server. Keep every value at the VANILLA baseline (don't re-crank); only `MaxAllowedPuppets` is a deliberate non-default. |
-| `tools/arena_horde_loop.py` | Confirm `LOG_DIR` + the live kill-log format (`IsInGameEvent` + `ServerLocation`), the `#SpawnZombie` argument order, the RCON port/password, and fill `PUPPET_IDS` (+ `ARENA_LOCATION` fallback) from live captures. |
+| `tools/arena_horde_loop.py` | Confirm `LOG_DIR` + the live kill-log format (`IsInGameEvent` + `ServerLocation`), the `#SpawnZombie` argument order, the RCON port/password, and fill the puppet IDs — sorted into `MILITARY_PUPPET_IDS` / `OTHER_PUPPET_IDS` (+ `ARENA_LOCATION` fallback) — from live captures. |
 | `docs/boss-cheat-sheet.md` | Replace the boss roster with real `BP_` codes from `#ListCharacters`. |
 | `docs/arena-setup.md` | Correct the Custom Zone steps / PvP-flag wording if the live behavior differs. |
 | `docs/live-verification-results.md` | **Create this** — log every confirmed value, its source (file path / in-game output), and confidence. |
@@ -103,14 +103,17 @@ Project root: `C:\Users\chris\scum-deathmatch-event\`
      is wrong; if flagged climbs but **located stays 0**, the `ServerLocation` field name is wrong.
 1. Run `#ListZombies` in admin chat. From it, pick the puppet **type IDs** you want for the arena horde —
    including tougher/faster types if Chris wants tanky enemies (difficulty is arena-only now, so it comes
-   from the puppet TYPE, not the global HP/speed multipliers). Record the exact IDs.
+   from the puppet TYPE, not the global HP/speed multipliers). **Sort them** into `MILITARY_PUPPET_IDS`
+   (the military/soldier puppets — these are preferred) and `OTHER_PUPPET_IDS` (everything else): each wave
+   is a random, military-leaning mix, with `MILITARY_BIAS` controlling the lean. Record the exact IDs.
 2. Stand in the **middle of the arena**, run `#Location`, and copy the WHOLE brace it prints
    (`{X=.. Y=.. Z=..|P=.. Y=.. R=..}`).
 3. **Verify the spawn syntax.** Run once by hand:
    `#SpawnZombie <id> 1 Location {<the brace>}` and confirm a puppet appears AT the arena (not in front of
    you). Confirm the argument order is `<id> <count> Location <brace>`; if the live build differs, note the
    real order. Also confirm `#DestroyZombiesWithinRadius <radius> {<brace>}` clears that spot.
-4. **Update `tools/arena_horde_loop.py`:** set `PUPPET_IDS` to the IDs, `ARENA_LOCATION` to the brace (the
+4. **Update `tools/arena_horde_loop.py`:** set `MILITARY_PUPPET_IDS` / `OTHER_PUPPET_IDS` to the sorted IDs
+   (tune `MILITARY_BIAS`), `ARENA_LOCATION` to the brace (the
    `USE_EVENT_LOCATION=False` fallback), `RCON_HOST`/`RCON_PORT`/`RCON_PASSWORD` to the SCUM-RCON values,
    and fix `SPAWN_TEMPLATE` if the argument order differed (`LOG_DIR` was set in B0). Test the spawn path
    with `python tools/arena_horde_loop.py --once`, then `--reset`. Then test the full trigger: run

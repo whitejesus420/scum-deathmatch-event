@@ -17,10 +17,11 @@ WHAT THIS DOES
   fresh match starts somewhere else, its first event kill pulls the swarm over,
   and the watcher loops event after event for the whole session. Because only
   event kills carry the flag, every spot is inside SCUM's own deathmatch arena, so
-  the swarm tracks the action without leaking onto the open map. It keeps waves
-  coming while the event stays hot, and clears every spot it fired at once the
-  event goes quiet. The rest of the map's Encounter Manager stays vanilla
-  (config/serversettings-horde-block.ini).
+  the swarm tracks the action without leaking onto the open map. Each wave is a
+  RANDOM, military-leaning mix of puppet types (not the same roster every time),
+  and it keeps waves coming while the event stays hot, then clears every spot it
+  fired at once the event goes quiet. The rest of the map's Encounter Manager
+  stays vanilla (config/serversettings-horde-block.ini).
 
 KNOWN CAVEATS (live-test these — see docs/live-verification-handoff.md)
   - REACTIVE, not on-start: the horde begins after the FIRST event kill (an event
@@ -45,9 +46,11 @@ USAGE
 BEFORE YOU RUN (fill in the CONFIG block below):
   1. Set LOG_DIR to the server's log folder (…\\SCUM\\Saved\\SaveFiles\\Logs).
   2. Enable RCON (SCUM-RCON mod) and set RCON_PORT + RCON_PASSWORD.
-  3. Run `#ListZombies` in-game and put the puppet TYPE IDs you want into
-     PUPPET_IDS. Difficulty is arena-only (the global HP/speed multipliers are
-     vanilla), so pick TOUGHER puppet types here for tanky/fast enemies.
+  3. Run `#ListZombies` in-game and SORT the puppet TYPE IDs you want into
+     MILITARY_PUPPET_IDS (preferred) and OTHER_PUPPET_IDS. Each wave is a random,
+     military-leaning mix (tune the lean with MILITARY_BIAS). Difficulty is
+     arena-only (the global HP/speed multipliers are vanilla), so pick TOUGHER
+     puppet types for tanky/fast enemies.
   4. (Only if USE_EVENT_LOCATION=False) stand in your arena, run `#Location`, and
      paste the whole brace into ARENA_LOCATION.
   Validate the watcher against real logs first with `--dry-run` (no RCON needed).
@@ -59,6 +62,7 @@ import argparse
 import glob
 import json
 import os
+import random
 import socket
 import struct
 import sys
@@ -86,15 +90,25 @@ USE_EVENT_LOCATION = True
 # when an event kill has no parseable ServerLocation. Keep it valid regardless.
 ARENA_LOCATION = "{X=-152157.266 Y=287169.562 Z=69696.133|P=0.000000 Y=0.000000 R=0.000000}"
 
-# Puppet TYPE IDs to spawn each wave (from `#ListZombies`). Mix types to taste;
-# pick tougher/faster types here for arena-only difficulty. One spawn command per
-# ID per wave.
-PUPPET_IDS = [
-    # "0",   # <- replace with real IDs from #ListZombies, e.g. a runner + a heavy
-    # "1",
+# Puppet TYPE IDs (from `#ListZombies`), split into two buckets so each wave is a
+# RANDOM, military-leaning mix instead of the same fixed roster every time. Every
+# puppet in a wave is drawn independently at random; a military type is
+# MILITARY_BIAS times as likely to be picked as a non-military one. Put your
+# military/soldier puppet IDs in MILITARY_PUPPET_IDS and everything else in
+# OTHER_PUPPET_IDS.
+#   - OTHER empty    => military only.
+#   - MILITARY empty => no preference (everything in OTHER, equal odds).
+# Pick tougher/faster types for arena-only difficulty (the global HP/speed
+# multipliers stay vanilla).
+MILITARY_PUPPET_IDS = [
+    # "0",   # <- military / soldier puppet IDs from #ListZombies (show up most)
 ]
+OTHER_PUPPET_IDS = [
+    # "1",   # <- civilian / everything-else IDs (show up less often)
+]
+MILITARY_BIAS = 4            # a military type is this many times likelier than a non-military one
 
-COUNT_PER_WAVE = 10          # puppets spawned per ID, per wave (mind MaxAllowedPuppets)
+COUNT_PER_WAVE = 10          # TOTAL puppets per wave (randomly typed; mind MaxAllowedPuppets)
 INTERVAL_SECONDS = 20        # seconds between waves while an event is live
 EVENT_QUIET_TIMEOUT = 90     # no event kills for this long => event over, clear arena
 POLL_SECONDS = 3             # how often to re-read the kill log
@@ -335,12 +349,47 @@ class KillLogWatcher:
 # =====================================================================
 #  Spawning / cleanup.
 # =====================================================================
+def _weighted_pool():
+    """Flat list of puppet IDs weighted by preference: each military ID appears
+    MILITARY_BIAS times, each other ID once, so random.choice over it draws a
+    military-leaning mix. Empty if nothing is configured."""
+    bias = MILITARY_BIAS if MILITARY_BIAS > 0 else 1
+    pool = list(OTHER_PUPPET_IDS)
+    for pid in MILITARY_PUPPET_IDS:
+        pool.extend([pid] * bias)
+    return pool
+
+
+def _roll_wave():
+    """Roll one wave: draw COUNT_PER_WAVE puppets at random from the military-
+    weighted pool and tally them into [(id, count), ...] in first-seen order, so a
+    wave is a random mix that leans military. Empty if no IDs are configured."""
+    pool = _weighted_pool()
+    if not pool:
+        return []
+    order = []
+    tally = {}
+    for _ in range(COUNT_PER_WAVE):
+        pid = random.choice(pool)
+        if pid not in tally:
+            order.append(pid)
+        tally[pid] = tally.get(pid, 0) + 1
+    return [(pid, tally[pid]) for pid in order]
+
+
+def _pool_summary():
+    """Short human label for the configured pool (for the startup banner)."""
+    return "mil=%s x%d, other=%s" % (
+        MILITARY_PUPPET_IDS or "[]", MILITARY_BIAS, OTHER_PUPPET_IDS or "[]")
+
+
 def fire_wave(rcon, loc):
-    """Spawn one wave: COUNT_PER_WAVE of each puppet ID at `loc`."""
-    for pid in PUPPET_IDS:
-        cmd = SPAWN_TEMPLATE.format(id=pid, count=COUNT_PER_WAVE, loc=loc)
+    """Spawn one wave: COUNT_PER_WAVE puppets total at `loc`, each a random type
+    drawn from the military-weighted pool (random horde, leaning military)."""
+    for pid, n in _roll_wave():
+        cmd = SPAWN_TEMPLATE.format(id=pid, count=n, loc=loc)
         resp = rcon.command(cmd)
-        print("  spawn id=%s x%d -> %s" % (pid, COUNT_PER_WAVE, resp.strip() or "ok"))
+        print("  spawn id=%s x%d -> %s" % (pid, n, resp.strip() or "ok"))
 
 
 def clear_arena(rcon, loc):
@@ -383,8 +432,11 @@ def _safe_call(rcon, fn, loc, what):
 
 def _do_wave(rcon, loc, dry):
     if dry:
-        for pid in PUPPET_IDS:
-            print("  [dry] " + SPAWN_TEMPLATE.format(id=pid, count=COUNT_PER_WAVE, loc=loc))
+        rolled = _roll_wave()
+        if not rolled:
+            print("  [dry] (no puppet IDs configured — nothing to spawn)")
+        for pid, n in rolled:
+            print("  [dry] " + SPAWN_TEMPLATE.format(id=pid, count=n, loc=loc))
         return True
     return _safe_call(rcon, fire_wave, loc, "wave")
 
@@ -425,8 +477,9 @@ def run_event_watcher(rcon, dry_run=False):
 
     where = "the event location" if USE_EVENT_LOCATION else ("ARENA_LOCATION " + ARENA_LOCATION)
     print("Watching %s for native-event kills." % LOG_DIR)
-    print("On an in-game-event kill: %d per id %s every %ds at %s; stop after %ds quiet."
-          % (COUNT_PER_WAVE, PUPPET_IDS, INTERVAL_SECONDS, where, EVENT_QUIET_TIMEOUT))
+    print("On an in-game-event kill: %d puppets/wave (random, military-leaning: %s) "
+          "every %ds at %s; stop after %ds quiet."
+          % (COUNT_PER_WAVE, _pool_summary(), INTERVAL_SECONDS, where, EVENT_QUIET_TIMEOUT))
     if dry_run:
         print("DRY RUN — not connecting to RCON; printing the commands instead.")
     print("Ctrl+C to stop (clears the arena if a horde is active).")
@@ -523,8 +576,9 @@ def _check_config(need_rcon, need_puppets, need_log):
     problems = []
     if need_rcon and not RCON_PASSWORD:
         problems.append("RCON_PASSWORD is empty — set it to your SCUM-RCON password.")
-    if need_puppets and not PUPPET_IDS:
-        problems.append("PUPPET_IDS is empty — add real IDs from `#ListZombies`.")
+    if need_puppets and not (MILITARY_PUPPET_IDS or OTHER_PUPPET_IDS):
+        problems.append("No puppet IDs configured — add real IDs from `#ListZombies` "
+                        "to MILITARY_PUPPET_IDS and/or OTHER_PUPPET_IDS.")
     if need_log:
         if not LOG_DIR:
             problems.append("LOG_DIR is empty — set it to …\\SCUM\\Saved\\SaveFiles\\Logs.")
@@ -561,8 +615,8 @@ def main():
             if args.reset:
                 print("[dry] " + CLEANUP_TEMPLATE.format(radius=CLEANUP_RADIUS, loc=ARENA_LOCATION))
             else:
-                for pid in PUPPET_IDS:
-                    print("[dry] " + SPAWN_TEMPLATE.format(id=pid, count=COUNT_PER_WAVE, loc=ARENA_LOCATION))
+                for pid, n in _roll_wave():
+                    print("[dry] " + SPAWN_TEMPLATE.format(id=pid, count=n, loc=ARENA_LOCATION))
             return 0
         rcon = RconClient(RCON_HOST, RCON_PORT, RCON_PASSWORD)
         if not _connect_with_retry(rcon):

@@ -175,10 +175,18 @@ event detection can be validated before going live.
   kill, then moves with the fight and follows new events — when
   `USE_EVENT_LOCATION=True` (default); the fixed `ARENA_LOCATION` when `False`.
 - **Difficulty is arena-only:** with the global HP/speed multipliers back at 1.0,
-  tanky/fast enemies come from choosing tougher puppet **type IDs** in
-  `PUPPET_IDS` — that buffs only what spawns at the event.
-- **Volume** comes from `<count>` and the interval, bounded by the global
-  `MaxAllowedPuppets` cap (heavy arena spawning draws from the shared pool).
+  tanky/fast enemies come from choosing tougher puppet **type IDs** — that buffs
+  only what spawns at the event.
+- **Composition is random, leaning military** (2026-06-23 #4: Chris — "make the
+  zombies random but prefer the military zombies"). IDs are split into
+  `MILITARY_PUPPET_IDS` (preferred) and `OTHER_PUPPET_IDS`; each puppet in a wave
+  is drawn independently from a weighted pool where a military type is
+  `MILITARY_BIAS`× as likely as a non-military one. So every wave is a fresh mix
+  that's mostly military with the occasional other type — `OTHER` empty = military
+  only, `MILITARY` empty = no preference.
+- **Volume** is `COUNT_PER_WAVE` TOTAL puppets per wave (randomly typed) times the
+  wave cadence, bounded by the global `MaxAllowedPuppets` cap (heavy arena
+  spawning draws from the shared pool).
 
 ### Layer 2 — The arena (in-game Custom Zone Manager, admin GUI)
 
@@ -232,7 +240,8 @@ All artifacts are text/config/stdlib-Python. There is no `.pak` and no Blueprint
 2. **Exact `ServerSettings.ini` key names** — verify every Layer-1 key against the live server's generated
    config (names from June-2026 research may have drifted). Values stay at vanilla regardless.
 3. **Boss / puppet codes** — capture real boss `BP_` codes from `#ListCharacters` and puppet type IDs from
-   `#ListZombies` on the live server (the latter feed `PUPPET_IDS` in the loop).
+   `#ListZombies` on the live server (the latter sort into `MILITARY_PUPPET_IDS` /
+   `OTHER_PUPPET_IDS` in the loop).
 4. **RCON + `#SpawnZombie` syntax** — confirm the SCUM-RCON port/password, that `#SpawnZombie <id> <count>
    Location <brace>` is the live argument order, and that the brace from `#Location` is accepted verbatim.
 4b. **Kill-log trigger** — confirm `LOG_DIR` (`…\Saved\SaveFiles\Logs`), that `kill_<ts>.log` is UTF-16-LE,
@@ -242,8 +251,9 @@ All artifacts are text/config/stdlib-Python. There is no `.pak` and no Blueprint
    SCUM's native event arena.
 5. **Hosting/edit path** — how Chris edits `ServerSettings.ini` and restarts. Affects the README deploy
    steps, not the design.
-6. **Playtest tuning** — dial in `COUNT_PER_WAVE` / `INTERVAL_SECONDS` vs. `MaxAllowedPuppets`; pick puppet
-   type IDs for the right toughness; confirm the loop's spawns land at the arena and NOWHERE else; confirm
+6. **Playtest tuning** — dial in `COUNT_PER_WAVE` (now TOTAL per wave) / `INTERVAL_SECONDS` vs.
+   `MaxAllowedPuppets`; sort puppet type IDs into `MILITARY_PUPPET_IDS` / `OTHER_PUPPET_IDS` and tune
+   `MILITARY_BIAS` for the right military lean; confirm the loop's spawns land at the arena and NOWHERE else; confirm
    `#DestroyZombiesWithinRadius <r> <brace>` clears the arena cleanly.
 
 ## Success criteria

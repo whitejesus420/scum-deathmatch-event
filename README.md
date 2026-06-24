@@ -64,9 +64,11 @@ keep the swarm pinned to the event.
    Record the center coordinates **as the full `#Location` brace** in that file.
 6. **Enable RCON** (SCUM-RCON Nexus mod) and fill in the CONFIG block at the top
    of `tools/arena_horde_loop.py`: `LOG_DIR` (the server's
-   `…\Saved\SaveFiles\Logs` folder), RCON host/port/password, and `PUPPET_IDS`
-   (from `#ListZombies`). Set `ARENA_LOCATION` (the brace from step 5) too — it's
-   the fallback if `USE_EVENT_LOCATION=False`.
+   `…\Saved\SaveFiles\Logs` folder), RCON host/port/password, and the puppet IDs
+   from `#ListZombies` — sorted into `MILITARY_PUPPET_IDS` (preferred) and
+   `OTHER_PUPPET_IDS` so each wave is a random, military-leaning mix. Set
+   `ARENA_LOCATION` (the brace from step 5) too — it's the fallback if
+   `USE_EVENT_LOCATION=False`.
 7. **Print/open** `docs/boss-cheat-sheet.md`.
 
 ## Running an event
@@ -103,10 +105,16 @@ keep the swarm pinned to the event.
 
 ## Tuning
 
-- **Bigger / more relentless horde** → raise `COUNT_PER_WAVE` or lower
-  `INTERVAL_SECONDS` in `tools/arena_horde_loop.py`. Mind the `MaxAllowedPuppets`
-  ceiling in the config block (raise it if waves can't reach their count).
-- **Tankier / faster enemies** → put tougher puppet **type IDs** in `PUPPET_IDS`.
+- **Bigger / more relentless horde** → raise `COUNT_PER_WAVE` (now the **total**
+  puppets per wave, randomly typed) or lower `INTERVAL_SECONDS` in
+  `tools/arena_horde_loop.py`. Mind the `MaxAllowedPuppets` ceiling in the config
+  block (raise it if waves can't reach their count). For a tight space like the
+  Brawl cage, go the other way — a *lower* count so it doesn't pack instantly.
+- **More / less military** → each wave is a random mix drawn from a weighted pool.
+  Put military/soldier IDs in `MILITARY_PUPPET_IDS` and the rest in
+  `OTHER_PUPPET_IDS`, then set `MILITARY_BIAS` (how many times likelier a military
+  type is). `OTHER` empty = military only; `MILITARY` empty = no preference.
+- **Tankier / faster enemies** → put tougher puppet **type IDs** in those buckets.
   Difficulty is arena-only now; the global HP/speed multipliers stay at 1.0 so
   the rest of the map isn't affected.
 - **Do NOT** raise the Encounter multipliers in the config block to "make it
